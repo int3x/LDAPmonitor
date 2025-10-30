@@ -18,6 +18,7 @@ import time
 import datetime
 import re
 from binascii import unhexlify
+from itertools import chain
 
 
 ### Data utils
@@ -129,6 +130,7 @@ class LDAPConsole(object):
         # Add all attributes
         self.all_ldap_attributes.append(ldap3.ALL_ATTRIBUTES)
         # Remove duplicates
+        self.all_ldap_attributes = list(chain.from_iterable(self.all_ldap_attributes))
         self.all_ldap_attributes = sorted(list(set(self.all_ldap_attributes)))
         return self.all_ldap_attributes
 
