@@ -11,7 +11,9 @@ import sys
 import random
 import ldap3
 from impacket.examples.utils import init_ldap_session, parse_identity
+from impacket.examples import logger
 from ldap3.protocol.formatters.formatters import format_sid
+import logging
 import time
 import datetime
 import re
@@ -38,67 +40,6 @@ def dict_path_access(d, path):
             return None
     return d
 
-### Logger
-
-class Logger(object):
-    def __init__(self, debug=False, logfile=None, nocolors=False):
-        super(Logger, self).__init__()
-        self.__debug = debug
-        self.__nocolors = nocolors
-        self.logfile = logfile
-        #
-        if self.logfile is not None:
-            if os.path.exists(self.logfile):
-                k = 1
-                while os.path.exists(self.logfile+(".%d"%k)):
-                    k += 1
-                self.logfile = self.logfile + (".%d" % k)
-            open(self.logfile, "w").close()
-
-    def print(self, message=""):
-        nocolor_message = re.sub(r"\x1b[\[]([0-9;]+)m", "", message)
-        if self.__nocolors:
-            print(nocolor_message)
-        else:
-            print(message)
-        if self.logfile is not None:
-            f = open(self.logfile, "a")
-            f.write(nocolor_message + "\n")
-            f.close()
-
-    def info(self, message):
-        nocolor_message = re.sub(r"\x1b[\[]([0-9;]+)m", "", message)
-        if self.__nocolors:
-            print("[info] %s" % nocolor_message)
-        else:
-            print("[info] %s" % message)
-        if self.logfile is not None:
-            f = open(self.logfile, "a")
-            f.write(nocolor_message + "\n")
-            f.close()
-
-    def debug(self, message):
-        if self.__debug == True:
-            nocolor_message = re.sub(r"\x1b[\[]([0-9;]+)m", "", message)
-            if self.__nocolors:
-                print("[debug] %s" % nocolor_message)
-            else:
-                print("[debug] %s" % message)
-            if self.logfile is not None:
-                f = open(self.logfile, "a")
-                f.write("[debug] %s" % nocolor_message + "\n")
-                f.close()
-
-    def error(self, message):
-        nocolor_message = re.sub(r"\x1b[\[]([0-9;]+)m", "", message)
-        if self.__nocolors:
-            print("[error] %s" % nocolor_message)
-        else:
-            print("[error] %s" % message)
-        if self.logfile is not None:
-            f = open(self.logfile, "a")
-            f.write("[error] %s" % nocolor_message + "\n")
-            f.close()
 
 ### LDAPConsole
 
@@ -113,7 +54,7 @@ class LDAPConsole(object):
         self.page_size = page_size
         self.__results = {}
         self.all_ldap_attributes = []
-        self.logger.debug("Using dn: %s" % self.target_dn)
+        logging.debug("Using dn: %s" % self.target_dn)
         self.get_all_ldap_attributes()
 
     def get_all_ldap_attributes(self):
@@ -198,10 +139,10 @@ def diff(last1_query_results, last2_query_results, logger, ignore_user_logon=Fal
         if key in last1_query_results.keys():
             common_keys.append(key)
         else:
-            logger.print("%s \x1b[91m'%s' was deleted.\x1b[0m" % (dateprompt, key))
+            logging.info("%s \x1b[91m'%s' was deleted.\x1b[0m" % (dateprompt, key))
     for key in last1_query_results.keys():
         if key not in last2_query_results.keys() and key not in ignored_keys:
-            logger.print("%s \x1b[92m'%s' was added.\x1b[0m" % (dateprompt, key))
+            logging.info("%s \x1b[92m'%s' was added.\x1b[0m" % (dateprompt, key))
     #
     for _dn in common_keys:
         paths_l2 = dict_get_paths(last2_query_results[_dn])
@@ -217,7 +158,7 @@ def diff(last1_query_results, last2_query_results, logger, ignore_user_logon=Fal
         #
         if len(attrs_diff) != 0:
             # Print DN
-            logger.print("%s \x1b[94m%s\x1b[0m" % (dateprompt, _dn))
+            logging.info("%s \x1b[94m%s\x1b[0m" % (dateprompt, _dn))
             for _ad in attrs_diff:
                 path, value_after, value_before = _ad
                 attribute_path = "─>".join(["\"\x1b[93m%s\x1b[0m\"" % attr for attr in path])
@@ -238,11 +179,11 @@ def diff(last1_query_results, last2_query_results, logger, ignore_user_logon=Fal
                         for v in value_after
                     ]
                 if value_after is not None and value_before is not None:
-                    logger.print(" | Attribute %s changed from '\x1b[96m%s\x1b[0m' to '\x1b[96m%s\x1b[0m'" % (attribute_path, value_before, value_after))
+                    logging.info(" | Attribute %s changed from '\x1b[96m%s\x1b[0m' to '\x1b[96m%s\x1b[0m'" % (attribute_path, value_before, value_after))
                 elif value_after is None and value_before is not None:
-                    logger.print(" | Attribute %s = '\x1b[96m%s\x1b[0m' was deleted." % (attribute_path, value_before))
+                    logging.info(" | Attribute %s = '\x1b[96m%s\x1b[0m' was deleted." % (attribute_path, value_before))
                 elif value_after is not None and value_before is None:
-                    logger.print(" | Attribute %s = '\x1b[96m%s\x1b[0m' was created." % (attribute_path, value_after))
+                    logging.info(" | Attribute %s = '\x1b[96m%s\x1b[0m' was created." % (attribute_path, value_after))
 
 
 def parse_args():
@@ -251,9 +192,6 @@ def parse_args():
     parser.add_argument('-use-ldaps', action='store_true', help='Use LDAPS instead of LDAP')
     parser.add_argument('-ts', action='store_true', help='Adds timestamp to every logging output')
     parser.add_argument("-debug", dest="debug", action="store_true", default=False, help="Debug mode.")
-
-    parser.add_argument("--no-colors", dest="no_colors", action="store_true", default=False, help="No colors mode.")
-    parser.add_argument("-l", "--logfile", dest="logfile", type=str, default=None, help="Log file to save output to.")
     parser.add_argument("-s", "--page-size", dest="page_size", type=int, default=1000, help="Page size.")
     parser.add_argument("-S", "--search-base", dest="search_base", type=str, default=None, help="Search base.")
     parser.add_argument("-r", "--randomize-delay", dest="randomize_delay", action="store_true", default=False, help="Randomize delay between two queries, between 1 and 5 seconds.")
@@ -297,17 +235,15 @@ def query_all_naming_contexts(ldap_server, ldap_session, logger, page_size, sear
 
 if __name__ == '__main__':
     args = parse_args()
-#    logger.init(args.ts, args.debug)
-    logger = Logger(debug=args.debug, nocolors=args.no_colors, logfile=args.logfile)
-    logger.print("[+]======================================================")
-    logger.print("[+]    LDAP live monitor v1.3        @podalirius_        ")
-    logger.print("[+]======================================================")
-    logger.print()
+    logger.init(args.ts, args.debug)
+    logging.info("======================================================")
+    logging.info("    LDAP live monitor v1.3        @podalirius_        ")
+    logging.info("======================================================")
 
     domain, username, password, lmhash, nthash, args.k = parse_identity(args.identity, args.hashes, args.no_pass, args.aesKey, args.k)
 
     try:
-        logger.print("[>] Trying to connect to %s ..." % args.dc_ip)
+        logging.debug("Trying to connect to %s ..." % args.dc_ip)
         ldap_server, ldap_session = init_ldap_session(
             domain,
             username,
@@ -321,19 +257,19 @@ if __name__ == '__main__':
             use_ldaps=args.use_ldaps
         )
 
-        logger.debug("Authentication successful!")
+        logging.debug("Authentication successful!")
 
         last2_query_results = query_all_naming_contexts(ldap_server, ldap_session, logger, args.page_size, args.search_base)
         last1_query_results = last2_query_results
 
-        logger.print("[>] Listening for LDAP changes ...")
+        logging.info("Listening for LDAP changes ...")
         running = True
         while running:
             if args.randomize_delay == True:
                 delay = random.randint(1000, 5000) / 1000
             else:
                 delay = args.time_delay
-            logger.debug("Waiting %s seconds" % str(delay))
+            logging.debug("Waiting %s seconds" % str(delay))
             time.sleep(delay)
             #
             last2_query_results = last1_query_results
