@@ -8,16 +8,13 @@
 import argparse
 import os
 import sys
-import ssl
 import random
 import ldap3
-from sectools.windows.ldap.ldap import raw_ldap_query, init_ldap_session
-from sectools.windows.crypto import nt_hash, parse_lm_nt_hashes
+from sectools.windows.ldap.ldap import init_ldap_session
 from ldap3.protocol.formatters.formatters import format_sid
 import time
 import datetime
 import re
-from binascii import unhexlify
 from itertools import chain
 
 
