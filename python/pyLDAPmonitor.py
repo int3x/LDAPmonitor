@@ -10,7 +10,7 @@ import os
 import sys
 import random
 import ldap3
-from sectools.windows.ldap.ldap import init_ldap_session
+from impacket.examples.utils import init_ldap_session, parse_identity
 from ldap3.protocol.formatters.formatters import format_sid
 import time
 import datetime
@@ -247,8 +247,11 @@ def diff(last1_query_results, last2_query_results, logger, ignore_user_logon=Fal
 
 def parse_args():
     parser = argparse.ArgumentParser(add_help=True, description='Monitor LDAP changes live!')
-    parser.add_argument('--use-ldaps', action='store_true', help='Use LDAPS instead of LDAP')
-    parser.add_argument("--debug", dest="debug", action="store_true", default=False, help="Debug mode.")
+    parser.add_argument('identity', action='store', help='domain.local/username[:password]')
+    parser.add_argument('-use-ldaps', action='store_true', help='Use LDAPS instead of LDAP')
+    parser.add_argument('-ts', action='store_true', help='Adds timestamp to every logging output')
+    parser.add_argument("-debug", dest="debug", action="store_true", default=False, help="Debug mode.")
+
     parser.add_argument("--no-colors", dest="no_colors", action="store_true", default=False, help="No colors mode.")
     parser.add_argument("-l", "--logfile", dest="logfile", type=str, default=None, help="Log file to save output to.")
     parser.add_argument("-s", "--page-size", dest="page_size", type=int, default=1000, help="Page size.")
@@ -258,35 +261,21 @@ def parse_args():
     parser.add_argument("--ignore-user-logon", dest="ignore_user_logon", action="store_true", default=False, help="Ignores user logon events.")
     # parser.add_argument("-n", "--notify", dest="notify", action="store_true", default=False, help="Uses LDAP_SERVER_NOTIFICATION_OID to get only changed objects. (useful for large domains).")
 
-    authconn = parser.add_argument_group('authentication & connection')
-    authconn.add_argument('--dc-ip', dest="dc_ip", action='store', metavar="ip address", help='IP Address of the domain controller or KDC (Key Distribution Center) for Kerberos. If omitted it will use the domain part (FQDN) specified in the identity parameter')
-    authconn.add_argument('--kdcHost', dest="kdcHost", action='store', metavar="FQDN KDC", help='FQDN of KDC for Kerberos.')
-    authconn.add_argument("-d", "--domain", dest="auth_domain", metavar="DOMAIN", action="store", help="(FQDN) domain to authenticate to")
-    authconn.add_argument("-u", "--user", dest="auth_username", metavar="USER", action="store", help="user to authenticate with")
+    group = parser.add_argument_group('authentication')
+    group.add_argument('-hashes', action="store", metavar="LMHASH:NTHASH", help='NTLM hashes, format is LMHASH:NTHASH')
+    group.add_argument('-no-pass', action="store_true", help='don\'t ask for password (useful for -k)')
+    group.add_argument('-k', action="store_true", help='Use Kerberos authentication. Grabs credentials from ccache file (KRB5CCNAME) based on target parameters. If valid credentials cannot be found, it will use the ones specified in the command line')
+    group.add_argument('-aesKey', action="store", metavar="hex key", help='AES key to use for Kerberos Authentication (128 or 256 bits)')
 
-    secret = parser.add_argument_group()
-    cred = secret.add_mutually_exclusive_group()
-    cred.add_argument('--no-pass', action="store_true", help='don\'t ask for password (useful for -k)')
-    cred.add_argument("-p", "--password", dest="auth_password", metavar="PASSWORD", action="store", help="password to authenticate with")
-    cred.add_argument("-H", "--hashes", dest="auth_hashes", action="store", metavar="[LMHASH:]NTHASH", help='NT/LM hashes, format is LMhash:NThash')
-    cred.add_argument('--aes-key', dest="auth_key", action="store", metavar="hex key", help='AES key to use for Kerberos Authentication (128 or 256 bits)')
-    secret.add_argument("-k", "--kerberos", dest="use_kerberos", action="store_true", help='Use Kerberos authentication. Grabs credentials from .ccache file (KRB5CCNAME) based on target parameters. If valid credentials cannot be found, it will use the ones specified in the command line')
+    group = parser.add_argument_group('connection')
+    group.add_argument('-dc-ip', action='store', metavar="ip address", help='IP Address of the domain controller or KDC (Key Distribution Center) for Kerberos. If omitted it will use the domain part (FQDN) specified in the identity parameter')
+    group.add_argument('-dc-host', action='store', metavar="hostname", help='Hostname of the domain controller or KDC (Key Distribution Center) for Kerberos. If omitted, -dc-ip will be used')
 
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)
-        
-    args = parser.parse_args()
-    
-    if args.auth_password is None and args.no_pass == False and args.auth_hashes is None:
-        print("[+] No password of hashes provided and --no-pass is '%s'" % args.no_pass)
-        from getpass import getpass
-        if args.auth_domain is not None:
-            args.auth_password = getpass("  | Provide a password for '%s\\%s':" % (args.auth_domain, args.auth_username))
-        else:
-            args.auth_password = getpass("  | Provide a password for '%s':" % args.auth_username)
 
-    return args
+    return parser.parse_args()
 
 
 def query_all_naming_contexts(ldap_server, ldap_session, logger, page_size, search_base=None):
@@ -308,40 +297,27 @@ def query_all_naming_contexts(ldap_server, ldap_session, logger, page_size, sear
 
 if __name__ == '__main__':
     args = parse_args()
+#    logger.init(args.ts, args.debug)
     logger = Logger(debug=args.debug, nocolors=args.no_colors, logfile=args.logfile)
     logger.print("[+]======================================================")
     logger.print("[+]    LDAP live monitor v1.3        @podalirius_        ")
     logger.print("[+]======================================================")
     logger.print()
 
-    auth_lm_hash = ""
-    auth_nt_hash = ""
-    if args.auth_hashes is not None:
-        if ":" in args.auth_hashes:
-            auth_lm_hash = args.auth_hashes.split(":")[0]
-            auth_nt_hash = args.auth_hashes.split(":")[1]
-        else:
-            auth_nt_hash = args.auth_hashes
-    
-    if args.auth_key is not None:
-        args.use_kerberos = True
-    
-    if args.use_kerberos is True and args.kdcHost is None:
-        print("[!] Specify KDC's Hostname of FQDN using the argument --kdcHost")
-        exit()
+    domain, username, password, lmhash, nthash, args.k = parse_identity(args.identity, args.hashes, args.no_pass, args.aesKey, args.k)
 
     try:
         logger.print("[>] Trying to connect to %s ..." % args.dc_ip)
         ldap_server, ldap_session = init_ldap_session(
-            auth_domain=args.auth_domain,
-            auth_dc_ip=args.dc_ip,
-            auth_username=args.auth_username,
-            auth_password=args.auth_password,
-            auth_lm_hash=auth_lm_hash,
-            auth_nt_hash=auth_nt_hash,
-            auth_key=args.auth_key,
-            use_kerberos=args.use_kerberos,
-            kdcHost=args.kdcHost,
+            domain,
+            username,
+            password,
+            lmhash,
+            nthash,
+            args.k,
+            args.dc_ip,
+            args.dc_host,
+            args.aesKey,
             use_ldaps=args.use_ldaps
         )
 
